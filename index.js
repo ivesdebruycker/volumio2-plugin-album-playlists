@@ -97,7 +97,7 @@ function getPlaylistFiles(dir, done) {
             if (!--pending) done(null, results);
           });
         } else {
-         if (file.endsWith('.m3u') && !file.startsWith('.')) {
+         if (file.endsWith('.m3u') && !path.basename(file).startsWith('.')) {
            results.push(file);
          }
          if (!--pending) done(null, results);
