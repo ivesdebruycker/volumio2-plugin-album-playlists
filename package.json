@@ -1,5 +1,5 @@
 {
-  "name": "album-playlists",
+  "name": "album_playlists",
   "version": "1.0.0",
   "description": "Album playlists plugin for Volumio2",
   "main": "index.js",
@@ -9,6 +9,6 @@
   "author": "",
   "license": "ISC",
   "volumio_info": {
-    "plugin_type": "miscellanea"
+    "plugin_type": "music_service"
   }
 }

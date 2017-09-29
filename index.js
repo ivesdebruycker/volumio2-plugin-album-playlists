@@ -1,20 +1,10 @@
 'use strict';
 
-/**
-* https://github.com/volumio/Volumio2-UI/blob/master/src/app/components/side-menu/elements/modal-alarm-clock.html
-* https://github.com/volumio/volumio-plugins/blob/master/plugins/music_service/spotify/index.js
-* https://github.com/balbuze/volumio-plugins/tree/master/plugins/miscellanea/unmutedigiamp
-*/
-
 var libQ = require('kew');
-var fs=require('fs-extra');
-var schedule = require('node-schedule');
-var moment = require('moment');
 var config= new (require('v-conf'))();
 var fs = require('fs');
 var path = require('path');
 
-// Define the AlarmClock class
 module.exports = AlbumPlaylists;
 
 function AlbumPlaylists(context) {
@@ -26,43 +16,42 @@ function AlbumPlaylists(context) {
   self.configManager = self.context.configManager;
   self.logger = self.context.logger;
   self.playlistManager = self.context.playlistManager;
+  self.controllerMpd = self.commandRouter.pluginManager.getPlugin('music_service', 'mpd');
 }
 
 AlbumPlaylists.prototype.onVolumioStart = function() {
   var self = this;
-  //Perform startup tasks here
   self.addToBrowseSources();
+
+  return libQ.resolve();
 };
 
 AlbumPlaylists.prototype.onStart = function() {
   var self = this;
-  //Perform startup tasks here
+
+  return libQ.resolve();
 };
 
 AlbumPlaylists.prototype.onStop = function() {
   var self = this;
-  //Perform startup tasks here
 };
 
 AlbumPlaylists.prototype.onRestart = function() {
   var self = this;
-  //Perform startup tasks here
 };
 
 AlbumPlaylists.prototype.onInstall = function()
 {
   var self = this;
-  //Perform your installation tasks here
 };
 
 AlbumPlaylists.prototype.onUninstall = function()
 {
   var self = this;
-  //Perform your installation tasks here
 };
 
 AlbumPlaylists.prototype.addToBrowseSources = function () {
-  var data = {name: 'Albums', uri: 'album-view', plugin_type:'miscellanea', plugin_name:'album-playlists'};
+  var data = {name: 'Album playlists', uri: 'album-view', plugin_type:'music_service', plugin_name:'album_playlists'};
   this.commandRouter.volumioAddToBrowseSources(data);
 };
 
@@ -75,7 +64,7 @@ AlbumPlaylists.prototype.handleBrowseUri = function(curUri) {
       response = self.listPlaylists();
     else
     {
-      response = self.listPlaylist(curUri);
+      response = self.listPlaylist(curUri.replace('album-view/', ''));
     }
   }
 
@@ -112,14 +101,20 @@ AlbumPlaylists.prototype.listPlaylists = function()
   var self = this;
   var defer = libQ.defer();
 
-  var response={
+  var response = {
     navigation: {
       prev: {
-        uri: ''
+        uri: "/"
       },
-      list: []
+      lists: [{
+        "title": "Albums",
+        "icon": "fa fa-folder",
+        "availableListViews": ["grid", "list"],
+        "items": []
+      }]
     }
   };
+  var list = response.navigation.lists[0].items;
 
   getPlaylistFiles('/mnt/NAS/Albums/', function (err, files) {
     if (err) {
@@ -128,19 +123,30 @@ AlbumPlaylists.prototype.listPlaylists = function()
 
     for(var i in files) {
       var folder = path.dirname(files[i]);
-      folder = folder.substring(folder.lastIndexOf('/') + 1);
-      var split = folder.split(' - ');
+      var folderName = folder.substring(folder.lastIndexOf('/') + 1);
+      var regexRes = /(.*?) - (.*)/.exec(folderName);
+      if (regexRes) {
+        var artist = regexRes[1];
+        var album = regexRes[2];
+      } else {
+        var artist = "<unknown>";
+        var album = folderName;
+      }
 
-      response.navigation.list.push({
-        service: 'mpd',
+      list.push({
+        service: 'album_playlists',
         type: 'playlist',
-        title: path.basename(files[i], '.m3u'),
-        artist: split[0] && split[0].trim(),
-        album: split[1] && split[1].trim(),
-        icon: 'fa fa-list-ol',
-        uri: files[i].replace('/mnt/', '/')
+        title: album,
+        artist: artist,
+        albumart: self.controllerMpd.getAlbumArt({artist: artist, album: album}, folder, 'fa-dot-circle-o'),
+        uri: 'album-view' + files[i]
       });
     }
+
+    list = list.sort(function (a, b) {
+      return a.title < b.title ? -1 : a.title > b.title;
+    });
+
 
     defer.resolve(response);
   });
@@ -148,6 +154,97 @@ AlbumPlaylists.prototype.listPlaylists = function()
   return defer.promise;
 }
 
-AlbumPlaylists.prototype.listPlaylist = function(crUri)
+AlbumPlaylists.prototype.listPlaylist = function(m3uFile)
 {
+  var self = this;
+
+  var defer = libQ.defer();
+  var count = 10;
+
+  var folder = path.dirname(m3uFile);
+  var folderName = folder.substring(folder.lastIndexOf('/') + 1);
+
+  var response = {
+    navigation: {
+      prev: {
+        uri: "album-view"
+      },
+      lists: [{
+        "title": folderName,
+        "icon": "fa fa-music",
+        "availableListViews": ["list"],
+        "items": []
+      }]
+    }
+  };
+
+  this.parseM3u(m3uFile).then(function (items) {
+    response.navigation.lists[0].items = items;
+    defer.resolve(response);
+  });
+
+
+  return defer.promise;
+}
+
+AlbumPlaylists.prototype.parseM3u = function(m3uFile)
+{
+  self.logger.info("Parsing m3u: " + m3uFile);
+
+  var self = this;
+  var defer = libQ.defer();
+  var folder = path.dirname(m3uFile);
+  var m3uRegex = /\#EXTINF:(\d*),(.*?) - (.*)/;
+  var lineReader = require('readline').createInterface({
+    input: require('fs').createReadStream(m3uFile)
+  });
+
+  var folderName = folder.substring(folder.lastIndexOf('/') + 1);
+  var split = folderName.split(' - ');
+  var m3uArtist = split[0] && split[0].trim();
+  var m3uAlbum = split[1] && split[1].replace(/\[\d*\]/, '').trim();
+
+  var items = [];
+  var meta = undefined;
+  var track = 0;
+  lineReader.on('line', function (line) {
+    if (line.startsWith('#EXTINF:')) {
+      var regexRes = m3uRegex.exec(line);
+      if (regexRes) {
+        meta = {
+          "title": regexRes[3],
+          "artist": regexRes[2],
+          "duration": regexRes[1],
+        }
+      }
+    } else if (meta) {
+      items.push({
+        "uri": "music-library/" + path.join(folder, line).replace('mnt/', ''),
+        "service": "mpd",
+        "name": meta.title,
+        "title": meta.title,
+        "artist": meta.artist,
+        "album": m3uAlbum,
+        "type": "song", // NIET track
+        "tracknumber": track++,
+        "albumart": self.controllerMpd.getAlbumArt({artist: m3uArtist, album: m3uAlbum}, folder, 'fa-dot-circle-o'),
+        "duration": track.duration,
+        "trackType":"mp3"
+      });
+      meta = undefined;
+    }
+  });
+
+  lineReader.on('close', function () {
+    defer.resolve(items);
+  });
+
+  return defer.promise;
+}
+
+AlbumPlaylists.prototype.explodeUri = function(uri)
+{
+  var self = this;
+
+  return this.parseM3u(uri.replace('album-view/', ''));
 }
