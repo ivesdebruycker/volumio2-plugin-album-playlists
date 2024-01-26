@@ -10,12 +10,17 @@ module.exports = AlbumPlaylists;
 function AlbumPlaylists(context) {
   var self = this;
 
+
   // Save a reference to the parent commandRouter
   self.context=context;
   self.commandRouter = self.context.coreCommand;
   self.configManager = self.context.configManager;
   self.logger = self.context.logger;
   self.playlistManager = self.context.playlistManager;
+
+
+  // self.logger.info("################################AlbumPlaylists");
+  // console.log('AlbumPlaylists ' );
   self.controllerMpd = self.commandRouter.pluginManager.getPlugin('music_service', 'mpd');
 }
 
@@ -37,6 +42,7 @@ AlbumPlaylists.prototype.onStop = function() {
 };
 
 AlbumPlaylists.prototype.onRestart = function() {
+console.log("AlbumPlaylists.onRestart");
   var self = this;
 };
 
@@ -51,7 +57,12 @@ AlbumPlaylists.prototype.onUninstall = function()
 };
 
 AlbumPlaylists.prototype.addToBrowseSources = function () {
-  var data = {name: 'Album playlists', uri: 'album-view', plugin_type:'music_service', plugin_name:'album_playlists'};
+  var data = {
+    name: 'Album playlists',
+    uri: 'album-view',
+    plugin_type:'music_service',
+    plugin_name:'album_playlists',
+    albumart: '/albumart?sourceicon=music_service/album_playlists/icon_albums.jpg'};
   this.commandRouter.volumioAddToBrowseSources(data);
 };
 
@@ -59,12 +70,15 @@ AlbumPlaylists.prototype.handleBrowseUri = function(curUri) {
   var self = this;
   var response;
 
+  // self.logger.info("################################handleBrowseUri");
+  // console.log('handleBrowseUri '+ curUri);
+
   if(curUri.startsWith('album-view')){
     if(curUri == 'album-view')
       response = self.listPlaylists();
     else
     {
-      response = self.listPlaylist(curUri.replace('album-view/', ''));
+      response = self.listPlaylist(curUri.replace('album-view/', '/'));
     }
   }
 
@@ -73,6 +87,7 @@ AlbumPlaylists.prototype.handleBrowseUri = function(curUri) {
 
 function getPlaylistFiles(dir, done) {
   var results = [];
+  // console.log("reading " + dir);
   fs.readdir(dir, function(err, list) {
     if (err) return done(err);
     var pending = list.length;
@@ -108,7 +123,7 @@ AlbumPlaylists.prototype.listPlaylists = function()
       },
       lists: [{
         "title": "Albums",
-        "icon": "fa fa-folder",
+        "icon": "fa fa-music",
         "availableListViews": ["grid", "list"],
         "items": []
       }]
@@ -116,7 +131,7 @@ AlbumPlaylists.prototype.listPlaylists = function()
   };
   var list = response.navigation.lists[0].items;
 
-  getPlaylistFiles('/mnt/NAS/Albums/', function (err, files) {
+  getPlaylistFiles('/mnt/local/Albums/', function (err, files) {
     if (err) {
       defer.fail(new Error('An error occurred while listing playlists'));
     }
@@ -138,13 +153,18 @@ AlbumPlaylists.prototype.listPlaylists = function()
         type: 'playlist',
         title: album,
         artist: artist,
-        albumart: self.controllerMpd.getAlbumArt({artist: artist, album: album}, folder, 'fa-dot-circle-o'),
+        //albumart: '/albumart?sourceicon=music_service/album_playlists/icon_albums.jpg',
+        albumart: self.controllerMpd.getAlbumArt({artist: artist, album: album}, folder, 'dot-circle-o'),
         uri: 'album-view' + files[i]
       });
+
+      // console.log('album-view' + files[i]);
+
+
     }
 
     list = list.sort(function (a, b) {
-      return a.title < b.title ? -1 : a.title > b.title;
+      return a.artist < b.artist ? -1 : a.artist > b.artist;
     });
 
 
@@ -173,15 +193,16 @@ AlbumPlaylists.prototype.listPlaylist = function(m3uFile)
         "title": folderName,
         "icon": "fa fa-music",
         "availableListViews": ["list"],
+        albumart: '/albumart?sourceicon=music_service/album_playlists/icon_albums.jpg',
         "items": []
       }]
     }
   };
 
-  this.parseM3u(m3uFile).then(function (items) {
-    response.navigation.lists[0].items = items;
-    defer.resolve(response);
-  });
+   this.parseM3u(m3uFile).then(function (items) {
+     response.navigation.lists[0].items = items;
+     defer.resolve(response);
+   });
 
 
   return defer.promise;
@@ -189,7 +210,8 @@ AlbumPlaylists.prototype.listPlaylist = function(m3uFile)
 
 AlbumPlaylists.prototype.parseM3u = function(m3uFile)
 {
-  self.logger.info("Parsing m3u: " + m3uFile);
+  //self.logger.info("Parsing m3u: " + m3uFile);
+  //console.log('parseM3u ' + m3uFile);
 
   var self = this;
   var defer = libQ.defer();
@@ -219,7 +241,7 @@ AlbumPlaylists.prototype.parseM3u = function(m3uFile)
       }
     } else if (meta) {
       items.push({
-        "uri": "music-library/" + path.join(folder, line).replace('mnt/', ''),
+        "uri": "music-library/" + path.join(folder, line).replace('/mnt/', ''),
         "service": "mpd",
         "name": meta.title,
         "title": meta.title,
@@ -227,7 +249,8 @@ AlbumPlaylists.prototype.parseM3u = function(m3uFile)
         "album": m3uAlbum,
         "type": "song", // NIET track
         "tracknumber": track++,
-        "albumart": self.controllerMpd.getAlbumArt({artist: m3uArtist, album: m3uAlbum}, folder, 'fa-dot-circle-o'),
+        "albumart": self.controllerMpd.getAlbumArt({artist: m3uArtist, album: m3uAlbum}, folder, 'dot-circle-o'),
+        // "albumart": '/albumart?sourceicon=music_service/album_playlists/icon_albums.jpg',
         "duration": track.duration,
         "trackType":"mp3"
       });
@@ -246,5 +269,5 @@ AlbumPlaylists.prototype.explodeUri = function(uri)
 {
   var self = this;
 
-  return this.parseM3u(uri.replace('album-view/', ''));
+  return this.parseM3u(uri.replace('album-view/', '/'));
 }

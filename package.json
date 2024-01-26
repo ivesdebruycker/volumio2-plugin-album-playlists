@@ -10,5 +10,9 @@
   "license": "ISC",
   "volumio_info": {
     "plugin_type": "music_service"
+  },
+  "dependencies": {
+    "kew": "^0.7.0",
+    "v-conf": "^1.4.3"
   }
 }
